@@ -1,0 +1,579 @@
+<title>PDF Text Swap</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one sticky tool bar, then the document as a stack of paper pages on a desk-coloured ground. */
+:root {
+  --desk: #e6e9e8;
+  --panel: #f7f8f7;
+  --ink: #17201f;
+  --muted: #5b6866;
+  --line: #c9d0ce;
+  --accent: #0d6b62;
+  --accent-ink: #ffffff;
+  --marker: rgba(255, 196, 0, .38);
+  --marker-edge: #c28a00;
+  --warn: #9a4a00;
+  --bad: #a3202a;
+  --paper-shadow: 0 1px 2px rgba(20, 32, 30, .18), 0 8px 24px rgba(20, 32, 30, .12);
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --desk: #131817; --panel: #1c2322; --ink: #e7ecea; --muted: #9aa8a5; --line: #34403e;
+    --accent: #3fbfae; --accent-ink: #06211e; --marker: rgba(255, 196, 0, .42); --marker-edge: #e0a600;
+    --warn: #f0a860; --bad: #ff8a8f;
+    --paper-shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 24px rgba(0, 0, 0, .4);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --desk: #131817; --panel: #1c2322; --ink: #e7ecea; --muted: #9aa8a5; --line: #34403e;
+  --accent: #3fbfae; --accent-ink: #06211e; --marker: rgba(255, 196, 0, .42); --marker-edge: #e0a600;
+  --warn: #f0a860; --bad: #ff8a8f;
+  --paper-shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 24px rgba(0, 0, 0, .4);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--desk); color: var(--ink); font-family: var(--sans); font-size: 14px; line-height: 1.45; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--panel); }
+
+.bar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 9;
+  background: var(--panel); border-bottom: 1px solid var(--line);
+  padding-block: 8px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.bar-in { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; max-width: 1100px; margin: 0 auto; }
+.brand { font-weight: 600; font-size: 15px; letter-spacing: -.01em; margin-right: 4px; white-space: nowrap; }
+.file { font-family: var(--mono); font-size: 12px; color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 28ch; }
+.grow { flex: 1 1 0; min-width: 0; }
+.group { display: flex; align-items: center; gap: 6px; }
+
+button, .btn, select {
+  font: inherit; color: var(--ink); background: transparent; border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 11px; cursor: pointer; white-space: nowrap;
+}
+button:hover:not(:disabled), .btn:hover, select:hover { border-color: var(--muted); }
+button:disabled { opacity: .45; cursor: default; }
+button:focus-visible, .btn:focus-within, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 500; }
+.primary:hover:not(:disabled) { border-color: var(--accent); filter: brightness(1.08); }
+.btn input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.btn { position: relative; display: inline-block; }
+.sq { padding: 6px 9px; min-width: 32px; font-family: var(--mono); }
+.zoom { font-family: var(--mono); font-size: 12px; color: var(--muted); min-width: 4ch; text-align: center; }
+label.sel { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+select { padding: 6px 8px; max-width: 46vw; }
+
+.note {
+  max-width: 1100px; margin: 12px auto 0; padding-block: 0;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; color: var(--muted); font-size: 13px;
+}
+.note b { color: var(--ink); font-weight: 600; }
+.tag { font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; border: 1px solid var(--marker-edge); color: var(--ink); background: var(--marker); border-radius: 4px; padding: 1px 6px; }
+
+.stage {
+  padding-block: 16px 28px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; align-items: center; gap: 18px;
+}
+.scroller { max-width: 100%; overflow-x: auto; padding: 2px 2px 10px; }
+.page { position: relative; background: #fff; box-shadow: var(--paper-shadow); }
+.page canvas { display: block; width: 100%; height: 100%; }
+.pnum { font-family: var(--mono); font-size: 11px; color: var(--muted); align-self: center; margin-bottom: -10px; }
+.hit {
+  position: absolute; border-radius: 2px; cursor: text; background: transparent; border: 0; padding: 0;
+  outline: 1px dashed transparent;
+}
+.hit:hover, .hit:focus-visible { background: var(--marker); outline-color: var(--marker-edge); }
+.scan { position: absolute; left: 12px; top: 12px; font-size: 12px; color: #5a4300; background: #ffe9a8; border: 1px solid #d4a72c; border-radius: 4px; padding: 4px 8px; max-width: calc(100% - 24px); }
+
+.ed { position: absolute; z-index: 5; }
+.ed input {
+  display: block; border: 0; outline: 2px solid var(--marker-edge); outline-offset: 1px; border-radius: 1px;
+  background: #fff; color: #000; padding: 0; margin: 0; line-height: 1; min-width: 60px;
+}
+.pop {
+  position: absolute; left: 0; top: calc(100% + 8px); display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 6px;
+  box-shadow: var(--paper-shadow); width: max-content; max-width: min(92vw, 520px); font-size: 13px;
+}
+.pop .meta { font-family: var(--mono); font-size: 11px; color: var(--muted); padding: 0 4px; }
+.pop button { padding: 4px 9px; }
+.seg { display: flex; }
+.seg button { border-radius: 0; margin-left: -1px; padding: 4px 8px; font-size: 12px; }
+.seg button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+.seg button:last-child { border-radius: 0 6px 6px 0; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--panel); border-color: var(--ink); position: relative; }
+
+.drop { border: 2px dashed var(--line); border-radius: 10px; padding: 40px 20px; text-align: center; color: var(--muted); width: min(100%, 560px); }
+.toast {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 20;
+  background: var(--ink); color: var(--panel); border-radius: 8px; padding: 9px 14px; font-size: 13px;
+  max-width: min(92vw, 560px); box-shadow: var(--paper-shadow);
+}
+.toast.warn { background: var(--warn); color: #fff; }
+.toast.bad { background: var(--bad); color: #fff; }
+:root[data-theme="dark"] .toast.warn, :root[data-theme="dark"] .toast.bad { color: #1a0d00; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .toast.warn, :root:not([data-theme="light"]) .toast.bad { color: #1a0d00; } }
+details.how { max-width: 760px; margin: 0 auto; color: var(--muted); font-size: 13px;
+  padding-block: 0 32px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+details.how summary { cursor: pointer; color: var(--ink); font-weight: 500; }
+details.how ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 6px; }
+body.dragging .stage { outline: 3px dashed var(--accent); outline-offset: -8px; }
+@media (max-width: 560px) { .brand { display: none; } .file { max-width: 16ch; } }
+
+.props { max-width: 1100px; margin: 12px auto 0;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.props-in { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 12px; }
+.props h2 { font-size: 14px; font-weight: 600; margin: 0; }
+.facts { display: flex; flex-wrap: wrap; gap: 4px 18px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.facts b { color: var(--ink); font-weight: 500; }
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 10px 14px; }
+.fields label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); min-width: 0; }
+.fields input { font: inherit; font-size: 14px; color: var(--ink); background: var(--desk); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; width: 100%; min-width: 0; }
+.props-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.props-actions span { color: var(--muted); font-size: 12px; }
+</style>
+
+<header class="bar">
+  <div class="bar-in">
+    <span class="brand">PDF Text Swap</span>
+    <label class="btn primary" id="openLabel">Open PDF<input type="file" id="openFile" accept="application/pdf,.pdf"></label>
+    <span class="file" id="fileName"></span>
+    <span class="grow"></span>
+    <label class="sel" for="fontMode">New text font
+      <select id="fontMode">
+        <option value="auto">Match original</option>
+        <option value="sans">Sans (Arial-like)</option>
+        <option value="serif">Serif (Times-like)</option>
+        <option value="mono">Monospace (Courier-like)</option>
+        <option value="custom" id="customOpt" hidden>Your font file</option>
+      </select>
+    </label>
+    <label class="btn" title="Use the exact font (.ttf or .otf) the document was written in">Add font file<input type="file" id="fontFile" accept=".ttf,.otf,font/ttf,font/otf"></label>
+    <div class="group">
+      <button class="sq" id="zoomOut" aria-label="Zoom out">−</button>
+      <span class="zoom" id="zoomVal">100%</span>
+      <button class="sq" id="zoomIn" aria-label="Zoom in">+</button>
+    </div>
+    <button id="propsBtn" aria-expanded="false" aria-controls="props" disabled>Properties</button>
+    <button id="undo" disabled>Undo</button>
+    <button class="primary" id="save" disabled>Download PDF</button>
+  </div>
+</header>
+
+<section class="props" id="props" hidden aria-label="Document properties">
+  <form class="props-in" id="propsForm">
+    <h2>Document properties</h2>
+    <div class="facts" id="facts"></div>
+    <div class="fields">
+      <label for="mFile">File name for download<input id="mFile" type="text" autocomplete="off"></label>
+      <label for="mTitle">Title<input id="mTitle" type="text" autocomplete="off"></label>
+      <label for="mAuthor">Author<input id="mAuthor" type="text" autocomplete="off"></label>
+      <label for="mSubject">Subject<input id="mSubject" type="text" autocomplete="off"></label>
+      <label for="mKeywords">Keywords<input id="mKeywords" type="text" autocomplete="off"></label>
+      <label for="mCreator">Created with (application)<input id="mCreator" type="text" autocomplete="off"></label>
+      <label for="mProducer">PDF producer<input id="mProducer" type="text" autocomplete="off"></label>
+      <label for="mCreationDate">Created<input id="mCreationDate" type="datetime-local" step="1"></label>
+      <label for="mModDate">Modified<input id="mModDate" type="datetime-local" step="1"></label>
+    </div>
+    <div class="props-actions">
+      <button class="primary" type="submit">Save properties</button>
+      <button type="button" id="propsClear">Clear all fields</button>
+      <button type="button" id="propsClose">Close</button>
+      <span>Empty fields are removed from the file. Changes are written when you download.</span>
+    </div>
+  </form>
+</section>
+
+<div class="note" id="note"><span>Loading the PDF engine…</span></div>
+<main class="stage" id="stage"></main>
+
+<details class="how">
+  <summary>How the old text is removed</summary>
+  <ul>
+    <li>Only the words you change are rewritten. New text reuses the letter shapes already inside the file; if a character is not in the file, the same font family is used from a built-in set of common open fonts, and you are told when only a similar font was available.</li>
+    <li>Each edit deletes the original characters from the page’s content, then writes the new text at the same baseline, size and colour. Nothing is painted over the top, so there is no hidden layer to select, copy or search.</li>
+    <li>The download is a complete rewrite of the file. Earlier saved revisions and unused objects are dropped.</li>
+    <li>Your PDF is processed in this browser tab only. It is not uploaded anywhere, and Undo history is discarded when you close the tab.</li>
+    <li>Scanned pages are pictures, not text, so they have nothing to click.</li>
+    <li>Properties shows the file’s title, author, dates and the software that made it, and lets you change or remove them.</li>
+  </ul>
+</details>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const note = $("note"), stage = $("stage"), toastEl = $("toast");
+let engine = null, fileBase = "document", isSample = false;
+let undoStack = [], zoom = 1, editing = null, pages = [], busy = false;
+let toastTimer = 0;
+
+function toast(msg, kind = "", ms = 4200) {
+  toastEl.textContent = msg; toastEl.className = "toast " + kind; toastEl.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { toastEl.hidden = true; }, ms);
+}
+function setNote(html) { note.innerHTML = html; }
+
+const CSS_FAMILY = {
+  sans: 'Arial, Helvetica, "Liberation Sans", sans-serif',
+  serif: '"Times New Roman", Times, "Liberation Serif", serif',
+  mono: '"Courier New", Courier, "Liberation Mono", monospace',
+};
+
+let mupdf, createEngine;
+try {
+  mupdf = await import("./mupdf.js");
+  ({ createEngine } = await import("./engine.js"));
+} catch (err) {
+  setNote('<span style="color:var(--bad)">The PDF engine could not load in this view. Reload the page to try again.</span>');
+  throw err;
+}
+const { default: CATALOG } = await import("./catalog.js");
+const fontPacks = new Map();
+// Fonts ship as one pack per family; "family/400i" names a slice of that pack.
+async function loadFontFile(name) {
+  const [family, key] = name.split("/");
+  const def = CATALOG[family];
+  if (!def || !def.files[key]) return null;
+  if (!fontPacks.has(family)) {
+    fontPacks.set(family, (async () => {
+      try { const r = await fetch("./fontpacks/" + family + ".ttf"); return r.ok ? new Uint8Array(await r.arrayBuffer()) : null; }
+      catch { return null; }
+    })());
+  }
+  const pack = await fontPacks.get(family);
+  if (!pack) return null;
+  const [off, len] = def.files[key];
+  return pack.slice(off, off + len);
+}
+// Show the matching font in the edit box while typing.
+const previewFaces = new Map();
+async function previewFamily(line) {
+  const name = engine.previewFontName(line);
+  if (!name) return null;
+  if (!previewFaces.has(name)) {
+    previewFaces.set(name, (async () => {
+      try {
+        const data = await loadFontFile(name);
+        if (!data) return null;
+        const css = "pxed-" + name.replace(/\W/g, "-");
+        const face = new FontFace(css, data.buffer);
+        await face.load(); document.fonts.add(face);
+        return css;
+      } catch { return null; }
+    })());
+  }
+  return previewFaces.get(name);
+}
+engine = createEngine(mupdf, loadFontFile);
+
+function baseWidth() { return Math.max(200, Math.min(stage.clientWidth - 38, 900)); }
+
+function openBytes(bytes, name, sample) {
+  cancelEdit();
+  try { engine.open(bytes); }
+  catch (err) { toast(err.message || "That file could not be opened as a PDF.", "bad", 6000); return false; }
+  isSample = sample; fileBase = name.replace(/\.pdf$/i, "");
+  undoStack = []; saveName = ""; origSize = bytes.length;
+  $("propsBtn").disabled = false;
+  if (!$("props").hidden) setTimeout(fillProps, 0);
+  if (!sample) setTimeout(() => toggleProps(true), 0);
+  $("fileName").textContent = sample ? "" : name;
+  $("save").disabled = false;
+  build();
+  refreshButtons();
+  setNote(sample
+    ? '<span class="tag">Sample</span><span><b>Click any text to change it.</b> This is an example page. Use Open PDF to load your own file.</span>'
+    : '<span><b>Click any text to change it.</b> Press Enter to apply, Esc to cancel. Clear the box to delete the text. Words you do not change are left untouched.</span>');
+  return true;
+}
+
+function refreshButtons() {
+  $("undo").disabled = undoStack.length === 0 || busy;
+  $("undo").textContent = undoStack.length ? `Undo (${undoStack.length})` : "Undo";
+}
+
+// Build page shells; each renders when it scrolls into view.
+const io = new IntersectionObserver((entries) => {
+  for (const e of entries) if (e.isIntersecting) { const p = pages[+e.target.dataset.i]; if (p && !p.drawn) draw(p); }
+}, { rootMargin: "600px 0px" });
+
+function build() {
+  io.disconnect();
+  stage.textContent = "";
+  pages = [];
+  const n = engine.pageCount();
+  for (let i = 0; i < n; i++) {
+    const size = engine.pageSize(i);
+    const scale = (baseWidth() / Math.max(size.width, 1)) * zoom;
+    const wrap = document.createElement("div"); wrap.className = "scroller";
+    const el = document.createElement("div"); el.className = "page"; el.dataset.i = i;
+    el.style.width = size.width * scale + "px"; el.style.height = size.height * scale + "px";
+    const canvas = document.createElement("canvas");
+    el.append(canvas); wrap.append(el);
+    if (n > 1) { const pn = document.createElement("div"); pn.className = "pnum"; pn.textContent = `Page ${i + 1} of ${n}`; stage.append(pn); }
+    stage.append(wrap);
+    pages.push({ i, el, canvas, size, scale, drawn: false, lines: [] });
+    io.observe(el);
+  }
+  $("zoomVal").textContent = Math.round(zoom * 100) + "%";
+}
+
+function draw(p) {
+  p.drawn = true;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const r = engine.render(p.i, p.scale * dpr);
+  p.canvas.width = r.width; p.canvas.height = r.height;
+  p.canvas.getContext("2d").putImageData(new ImageData(r.pixels, r.width, r.height), 0, 0);
+  for (const old of p.el.querySelectorAll(".hit, .scan")) old.remove();
+  p.lines = engine.lines(p.i);
+  if (!p.lines.length) {
+    const s = document.createElement("div"); s.className = "scan";
+    s.textContent = "No editable text on this page. It looks like a scan or an image.";
+    p.el.append(s);
+  }
+  p.lines.forEach((line, k) => {
+    const [x0, y0, x1, y1] = line.bbox;
+    const b = document.createElement("button");
+    b.className = "hit"; b.type = "button";
+    b.style.left = (x0 - p.size.x0) * p.scale - 2 + "px"; b.style.top = (y0 - p.size.y0) * p.scale - 1 + "px";
+    b.style.width = (x1 - x0) * p.scale + 4 + "px"; b.style.height = (y1 - y0) * p.scale + 2 + "px";
+    b.title = `${line.fontName} · ${+line.size.toFixed(2)} pt`;
+    b.setAttribute("aria-label", "Edit text: " + line.text);
+    b.addEventListener("click", () => startEdit(p, line));
+    p.el.append(b);
+  });
+}
+
+function cancelEdit() { if (editing) { editing.box.remove(); editing = null; } }
+
+function startEdit(p, line) {
+  if (busy) return;
+  cancelEdit();
+  const [x0, y0, x1, y1] = line.bbox;
+  const box = document.createElement("div"); box.className = "ed";
+  box.style.left = (x0 - p.size.x0) * p.scale + "px"; box.style.top = (y0 - p.size.y0) * p.scale + "px";
+  const input = document.createElement("input");
+  input.type = "text"; input.id = "lineEditor"; input.value = line.text; input.spellcheck = false;
+  input.setAttribute("aria-label", "Replacement text");
+  input.style.height = (y1 - y0) * p.scale + "px";
+  input.style.fontSize = line.size * p.scale + "px";
+  input.style.fontFamily = CSS_FAMILY[line.info.generic] || CSS_FAMILY.sans;
+  previewFamily(line).then((css) => { if (css && editing && editing.line === line) { input.style.fontFamily = `"${css}", ${CSS_FAMILY[line.info.generic] || CSS_FAMILY.sans}`; input.style.fontWeight = "400"; input.style.fontStyle = "normal"; fit(); } });
+  input.style.fontWeight = line.info.bold ? "700" : "400";
+  input.style.fontStyle = line.info.italic ? "italic" : "normal";
+  const fit = () => {
+    const room = p.el.clientWidth - (x0 - p.size.x0) * p.scale;
+    input.style.width = "60px";
+    input.style.width = Math.max((x1 - x0) * p.scale + 6, Math.min(input.scrollWidth + 8, Math.max(room, 120))) + "px";
+  };
+  const pop = document.createElement("div"); pop.className = "pop";
+  let align = "left";
+  const apply = document.createElement("button"); apply.className = "primary"; apply.textContent = "Replace"; apply.type = "button";
+  const cancel = document.createElement("button"); cancel.textContent = "Cancel"; cancel.type = "button";
+  const seg = document.createElement("div"); seg.className = "seg"; seg.setAttribute("role", "group"); seg.setAttribute("aria-label", "Keep which edge fixed");
+  for (const a of ["left", "center", "right"]) {
+    const b = document.createElement("button"); b.type = "button"; b.textContent = a[0].toUpperCase() + a.slice(1);
+    b.title = a === "left" ? "Keep the left edge where it is" : a === "right" ? "Keep the right edge where it is" : "Keep the line centred";
+    b.setAttribute("aria-pressed", a === align);
+    b.addEventListener("click", () => { align = a; for (const o of seg.children) o.setAttribute("aria-pressed", o === b); input.focus(); });
+    seg.append(b);
+  }
+  const meta = document.createElement("span"); meta.className = "meta"; meta.textContent = `${line.fontName} · ${+line.size.toFixed(2)} pt`;
+  pop.append(apply, cancel, seg, meta);
+  box.append(input, pop);
+  p.el.append(box);
+  editing = { box, p, line };
+  fit(); input.addEventListener("input", fit);
+  const over = pop.getBoundingClientRect().right - (document.documentElement.clientWidth - 10);
+  if (over > 0) pop.style.left = -over + "px";
+  input.focus(); input.select();
+  const commit = () => commitEdit(p, line, input.value, align);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); commit(); }
+    else if (e.key === "Escape") { e.preventDefault(); cancelEdit(); }
+  });
+  apply.addEventListener("click", commit);
+  cancel.addEventListener("click", cancelEdit);
+}
+
+async function commitEdit(p, line, text, align) {
+  if (busy) return;
+  if (text === line.text) { cancelEdit(); return; }
+  busy = true;
+  let before = null;
+  try {
+    before = engine.snapshot();
+    const mode = $("fontMode").value;
+    const rep = await engine.replaceLine(p.i, line, text, { fontMode: mode, align });
+    undoStack.push(before); if (undoStack.length > 30) undoStack.shift();
+    cancelEdit();
+    draw(p);
+    const words = (rep.missing || []).slice(0, 3).map((w) => "“" + w + "”").join(", ");
+    if (!text.trim()) toast("Text deleted from the page.");
+    else if (rep.exact) toast("Replaced using the document’s own letter shapes.");
+    else if (mode !== "auto") toast(`Replaced using ${rep.fonts.join(", ")}.`);
+    else if (!rep.generic) toast(`Replaced. ${words} needed characters the file does not contain, so the same font family was used from the built-in set.`, "", 6000);
+    else toast(`Replaced, but ${words} needed characters this file does not contain and its font is not in the built-in set, so a similar font was used (${rep.fonts.join(", ")}). Use Add font file for an exact match.`, "warn", 9000);
+  } catch (err) {
+    // Put the document back exactly as it was.
+    if (before) { try { engine.open(before); draw(p); } catch { /* keep going */ } }
+    toast(err && err.message ? err.message : "That edit could not be applied.", "bad", 7000);
+  } finally {
+    busy = false; refreshButtons();
+  }
+}
+
+$("undo").addEventListener("click", () => {
+  if (!undoStack.length || busy) return;
+  cancelEdit();
+  engine.open(undoStack.pop());
+  for (const p of pages) { p.drawn = false; const r = p.el.getBoundingClientRect(); if (r.bottom > -600 && r.top < innerHeight + 600) draw(p); }
+  refreshButtons();
+  if (!$("props").hidden) fillProps();
+  toast("Last change undone.");
+});
+
+async function readFile(file) { return new Uint8Array(await file.arrayBuffer()); }
+
+async function openFile(file) {
+  if (!file) return;
+  if (!/\.pdf$/i.test(file.name) && file.type !== "application/pdf") { toast("Choose a PDF file.", "bad"); return; }
+  openBytes(await readFile(file), file.name, false);
+}
+$("openFile").addEventListener("change", (e) => { openFile(e.target.files[0]); e.target.value = ""; });
+
+$("fontFile").addEventListener("change", async (e) => {
+  const file = e.target.files[0]; e.target.value = "";
+  if (!file) return;
+  try {
+    const name = file.name.replace(/\.(ttf|otf)$/i, "");
+    engine.setCustomFont(name, await readFile(file));
+    const opt = $("customOpt"); opt.hidden = false; opt.textContent = name;
+    $("fontMode").value = "custom";
+    toast(`New text will use ${name}.`);
+  } catch { toast("That font file could not be read. Use a .ttf or .otf file.", "bad"); }
+});
+
+for (const [id, f] of [["zoomIn", 1.25], ["zoomOut", 0.8]]) {
+  $(id).addEventListener("click", () => {
+    if (!pages.length) return;
+    zoom = Math.min(3, Math.max(0.5, +(zoom * f).toFixed(3)));
+    cancelEdit(); build();
+  });
+}
+let rz = 0, lastW = stage.clientWidth;
+addEventListener("resize", () => {
+  clearTimeout(rz);
+  rz = setTimeout(() => { if (pages.length && !editing && Math.abs(stage.clientWidth - lastW) > 4) { lastW = stage.clientWidth; build(); } }, 200);
+});
+
+addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !editing) { e.preventDefault(); $("undo").click(); }
+});
+
+// Drag a PDF anywhere on the page.
+addEventListener("dragover", (e) => { e.preventDefault(); document.body.classList.add("dragging"); });
+addEventListener("dragleave", (e) => { if (!e.relatedTarget) document.body.classList.remove("dragging"); });
+addEventListener("drop", (e) => { e.preventDefault(); document.body.classList.remove("dragging"); openFile(e.dataTransfer.files[0]); });
+
+$("save").addEventListener("click", async () => {
+  if (busy || !pages.length) return;
+  cancelEdit();
+  let bytes;
+  try { bytes = engine.save(); } catch { toast("The PDF could not be written.", "bad"); return; }
+  const filename = saveName || fileBase + "-edited.pdf";
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  const downloads = await (window.claude?.use ? window.claude.use("downloads") : null);
+  if (downloads) {
+    try { await downloads.save({ filename, data: blob }); toast("Saved " + filename + "."); }
+    catch (err) {
+      if (err && err.code === "declined") toast("Download cancelled.");
+      else if (err && err.code === "rate_limited") toast("A download prompt is already open. Try again in a moment.", "warn");
+      else toast("Downloads are not available in this view. Open the page in a browser tab and try again.", "bad", 7000);
+    }
+  } else {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = filename; document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    toast("If nothing downloaded, open this page in a browser tab and try again.", "warn", 6000);
+  }
+});
+
+// ---- Document properties ----
+const META = ["Title", "Author", "Subject", "Keywords", "Creator", "Producer", "CreationDate", "ModDate"];
+let dateTails = {}, origSize = 0;
+// PDF dates look like D:20261123132617+05'30'. Show the wall-clock part; keep the zone suffix as it was.
+function pdfDateToLocal(v, key) {
+  const m = /^D:(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?(.*)$/.exec(v || "");
+  dateTails[key] = m ? m[7] : "";
+  if (!m) return "";
+  return `${m[1]}-${m[2] || "01"}-${m[3] || "01"}T${m[4] || "00"}:${m[5] || "00"}:${m[6] || "00"}`;
+}
+function localToPdfDate(v, key) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(v || "");
+  if (!m) return "";
+  let tail = dateTails[key];
+  if (!tail) { // no zone recorded: use this device's
+    const off = -new Date(v).getTimezoneOffset(), a = Math.abs(off);
+    tail = off === 0 ? "Z" : `${off > 0 ? "+" : "-"}${String(Math.floor(a / 60)).padStart(2, "0")}'${String(a % 60).padStart(2, "0")}'`;
+  }
+  return `D:${m[1]}${m[2]}${m[3]}${m[4]}${m[5]}${m[6] || "00"}${tail}`;
+}
+function fmtSize(n) { return n < 1024 * 1024 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(2) + " MB"; }
+function fillProps() {
+  const md = engine.getMetadata();
+  $("facts").innerHTML = "";
+  for (const [k, v] of [["Pages", md.pages], ["Size when opened", fmtSize(origSize)], ["PDF version", md.version]]) {
+    const s = document.createElement("span"); s.textContent = k + " "; const b = document.createElement("b"); b.textContent = v; s.append(b); $("facts").append(s);
+  }
+  $("mFile").value = fileBase + "-edited.pdf";
+  for (const k of META) $("m" + k).value = /Date$/.test(k) ? pdfDateToLocal(md.fields[k], k) : md.fields[k];
+}
+function toggleProps(show) {
+  $("props").hidden = !show; $("propsBtn").setAttribute("aria-expanded", String(show));
+  if (show) { fillProps(); $("props").scrollIntoView({ block: "nearest" }); }
+}
+$("propsBtn").addEventListener("click", () => toggleProps($("props").hidden));
+$("propsClose").addEventListener("click", () => toggleProps(false));
+$("propsClear").addEventListener("click", () => { for (const k of META) $("m" + k).value = ""; });
+$("propsForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  if (busy || !pages.length) return;
+  const name = $("mFile").value.trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/\.pdf$/i, "");
+  if (name) saveName = name + ".pdf";
+  const fields = {};
+  for (const k of META) fields[k] = /Date$/.test(k) ? localToPdfDate($("m" + k).value, k) : $("m" + k).value;
+  try {
+    const before = engine.snapshot();
+    engine.setMetadata(fields);
+    undoStack.push(before); if (undoStack.length > 30) undoStack.shift();
+    refreshButtons(); fillProps(); if (saveName) $("mFile").value = saveName;
+    toast("Properties saved. Download the PDF to keep them.");
+  } catch { toast("The properties could not be changed.", "bad"); }
+});
+let saveName = "";
+
+// Start with a marked sample so the page shows what it does.
+try {
+  const r = await fetch("./sample.pdf");
+  if (!r.ok) throw new Error("no sample");
+  openBytes(new Uint8Array(await r.arrayBuffer()), "sample.pdf", true);
+} catch {
+  setNote("<span><b>Open a PDF to begin.</b> Then click any line of text to change it.</span>");
+  const d = document.createElement("div"); d.className = "drop"; d.textContent = "Drop a PDF here, or use Open PDF above.";
+  stage.append(d);
+}
+</script>
