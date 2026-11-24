@@ -381,9 +381,34 @@ export function createEngine(mupdf, loadFontFile) {
 		return font;
 	}
 
+	// Friendly name for a status message, from a "family/weight" key or a base-14 name.
+	const FAMILY_LABELS = {
+		"liberation-serif": "Times New Roman", "liberation-sans": "Arial", "liberation-mono": "Courier New",
+		"eb-garamond": "EB Garamond", "pt-serif": "PT Serif", "pt-sans": "PT Sans", "dm-sans": "DM Sans",
+		"ibm-plex-sans": "IBM Plex Sans", "source-sans-3": "Source Sans", "source-code-pro": "Source Code Pro",
+		"noto-sans": "Noto Sans", "noto-serif": "Noto Serif", "work-sans": "Work Sans", "fira-sans": "Fira Sans",
+		"playfair-display": "Playfair Display", "libre-baskerville": "Libre Baskerville", "roboto-mono": "Roboto Mono",
+		"roboto-slab": "Roboto Slab", "public-sans": "Public Sans",
+	};
+	function prettyFontLabel(name) {
+		if (name.includes("/")) {
+			const fam = name.split("/")[0];
+			return FAMILY_LABELS[fam] || fam.split("-").map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
+		}
+		return name.replace(/-/g, " ");
+	}
+
 	// Fonts to try, in order, when the document's own font cannot draw a word.
 	function substituteNames(info, mode) {
 		const names = [];
+		// A specific family picked from the dropdown (e.g. "liberation-serif" for Times New Roman).
+		if (CATALOG[mode]) {
+			names.push(catalogFile(mode, info.weight, info.italic));
+			const g = CATALOG[mode].generic;
+			names.push(BASE14[g][info.variant]);
+			names.push(catalogFile("noto-sans", info.weight, info.italic));
+			return names.filter(Boolean);
+		}
 		const forced = mode === "sans" || mode === "serif" || mode === "mono" ? mode : null;
 		if (!forced && info.family) names.push(catalogFile(info.family, info.weight, info.italic));
 		const generic = forced || info.generic;
@@ -419,7 +444,7 @@ export function createEngine(mupdf, loadFontFile) {
 			const font = await getFontObject(name);
 			if (!font) continue;
 			const gids = encodeAll(font, word);
-			if (gids) return { key: "std:" + name, font, label: name.replace("/", " "), exact: false, gids,
+			if (gids) return { key: "std:" + name, font, label: prettyFontLabel(name), exact: false, gids,
 				matched: !!f.info.family && mode !== "sans" && mode !== "serif" && mode !== "mono" && name.startsWith(f.info.family + "/") };
 		}
 		return null;
@@ -656,9 +681,13 @@ export function createEngine(mupdf, loadFontFile) {
 		return report;
 	}
 
-	// Name of the bundled font file that best matches a line, for on-screen preview while typing.
-	function previewFontName(line) {
-		return line.info.family ? catalogFile(line.info.family, line.info.weight, line.info.italic) : null;
+	// Name of the bundled font file to preview in the edit box while typing. A specific
+	// family picked from the dropdown wins; otherwise the line's own family is shown.
+	function previewFontName(line, mode) {
+		const fam = CATALOG[mode] ? mode
+			: mode === "sans" ? "liberation-sans" : mode === "serif" ? "liberation-serif" : mode === "mono" ? "liberation-mono"
+			: line.info.family;
+		return fam ? catalogFile(fam, line.info.weight, line.info.italic) : null;
 	}
 
 	// Full rewrite: drops unreferenced objects and earlier revisions of the file.

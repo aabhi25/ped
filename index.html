@@ -154,9 +154,26 @@ body.dragging .stage { outline: 3px dashed var(--accent); outline-offset: -8px; 
     <label class="sel" for="fontMode">New text font
       <select id="fontMode">
         <option value="auto">Match original</option>
-        <option value="sans">Sans (Arial-like)</option>
-        <option value="serif">Serif (Times-like)</option>
-        <option value="mono">Monospace (Courier-like)</option>
+        <optgroup label="Named fonts">
+          <option value="liberation-serif">Times New Roman</option>
+          <option value="liberation-sans">Arial</option>
+          <option value="liberation-mono">Courier New</option>
+          <option value="roboto">Roboto</option>
+          <option value="open-sans">Open Sans</option>
+          <option value="lato">Lato</option>
+          <option value="montserrat">Montserrat</option>
+          <option value="poppins">Poppins</option>
+          <option value="inter">Inter</option>
+          <option value="merriweather">Merriweather</option>
+          <option value="lora">Lora</option>
+          <option value="eb-garamond">EB Garamond</option>
+          <option value="playfair-display">Playfair Display</option>
+        </optgroup>
+        <optgroup label="Font style">
+          <option value="sans">Sans (Arial-like)</option>
+          <option value="serif">Serif (Times-like)</option>
+          <option value="mono">Monospace (Courier-like)</option>
+        </optgroup>
         <option value="custom" id="customOpt" hidden>Your font file</option>
       </select>
     </label>
@@ -261,7 +278,7 @@ async function loadFontFile(name) {
 // Show the matching font in the edit box while typing.
 const previewFaces = new Map();
 async function previewFamily(line) {
-  const name = engine.previewFontName(line);
+  const name = engine.previewFontName(line, $("fontMode").value);
   if (!name) return null;
   if (!previewFaces.has(name)) {
     previewFaces.set(name, (async () => {
